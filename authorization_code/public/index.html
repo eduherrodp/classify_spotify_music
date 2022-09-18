@@ -1,0 +1,421 @@
+<!doctype html>
+<html>
+
+<head>
+  <title>Example of the Authorization Code flow with Spotify</title>
+  <link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+  <style type="text/css">
+    #login,
+    #loggedin {
+      display: none;
+    }
+
+    .text-overflow {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      width: 500px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <div id="login">
+      <h1>This is an example of the Authorization Code flow</h1>
+      <a href="/login" class="btn btn-primary">Log in with Spotify</a>
+    </div>
+    <div id="loggedin">
+      <div id="user-profile">
+      </div>
+      <div id="oauth">
+      </div>
+      <button class="btn btn-default" id="obtain-new-token">Obtain new token using the refresh token</button>
+      <!-- Button to get all songs  -->
+      <button class="btn btn-default" id="get-all-songs">Get all songs</button>
+      <button class="btn btn-default" id="download-csv">Download CSV file</button>
+      <button class="btn btn-default" id="duplicated-songs">Get duplicated songs</button>
+      <button class="btn btn-default" id="delete-duplicated-songs">Delete duplicated songs</button>
+      <button class="btn btn-default" id="get-artists">Get artists</button>
+
+    </div>
+  </div>
+
+  <script id="user-profile-template" type="text/x-handlebars-template">
+      <h1>Logged in as {{display_name}}</h1>
+      <div class="media">
+        <div class="pull-left">
+          <img class="media-object" width="150" src="{{images.0.url}}" />
+        </div>
+        <div class="media-body">
+          <dl class="dl-horizontal">
+            <dt>Display name</dt><dd class="clearfix">{{display_name}}</dd>
+            <dt>Id</dt><dd>{{id}}</dd>
+            <dt>Email</dt><dd>{{email}}</dd>
+            <dt>Spotify URI</dt><dd><a href="{{external_urls.spotify}}">{{external_urls.spotify}}</a></dd>
+            <dt>Link</dt><dd><a href="{{href}}">{{href}}</a></dd>
+            <dt>Profile Image</dt><dd class="clearfix"><a href="{{images.0.url}}">{{images.0.url}}</a></dd>
+            <dt>Country</dt><dd>{{country}}</dd>
+          </dl>
+        </div>
+      </div>
+    </script>
+
+  <script id="oauth-template" type="text/x-handlebars-template">
+      <h2>oAuth info</h2>
+      <dl class="dl-horizontal">
+        <dt>Access token</dt><dd class="text-overflow">{{access_token}}</dd>
+        <dt>Refresh token</dt><dd class="text-overflow">{{refresh_token}}</dd>
+      </dl>
+    </script>
+  </br>
+  <div id="results">
+    <div id="list-tracks"></div>
+  </div>
+
+  <script src="//cdnjs.cloudflare.com/ajax/libs/handlebars.js/2.0.0-alpha.1/handlebars.min.js"></script>
+  <script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+  <script>
+    // Global variable tracks
+
+    (function () {
+
+      /**
+       * Obtains parameters from the hash of the URL
+       * @return Object
+       */
+      function getHashParams() {
+        var hashParams = {};
+        var e, r = /([^&;=]+)=?([^&;]*)/g,
+          q = window.location.hash.substring(1);
+        while (e = r.exec(q)) {
+          hashParams[e[1]] = decodeURIComponent(e[2]);
+        }
+        return hashParams;
+      }
+
+      var userProfileSource = document.getElementById('user-profile-template').innerHTML,
+        userProfileTemplate = Handlebars.compile(userProfileSource),
+        userProfilePlaceholder = document.getElementById('user-profile');
+
+      var oauthSource = document.getElementById('oauth-template').innerHTML,
+        oauthTemplate = Handlebars.compile(oauthSource),
+        oauthPlaceholder = document.getElementById('oauth');
+
+      var params = getHashParams();
+
+      var access_token = params.access_token,
+        refresh_token = params.refresh_token,
+        error = params.error;
+
+      if ( error ) {
+        alert('There was an error during the authentication');
+      } else {
+        if ( access_token ) {
+          // render oauth info
+          oauthPlaceholder.innerHTML = oauthTemplate({
+            access_token: access_token,
+            refresh_token: refresh_token
+          });
+
+          $.ajax({
+            url: 'https://api.spotify.com/v1/me',
+            headers: {
+              'Authorization': 'Bearer ' + access_token
+            },
+            success: function (response) {
+              userProfilePlaceholder.innerHTML = userProfileTemplate(response);
+
+              $('#login').hide();
+              $('#loggedin').show();
+            }
+          });
+        } else {
+          // render initial screen
+          $('#login').show();
+          $('#loggedin').hide();
+        }
+
+        document.getElementById('obtain-new-token').addEventListener('click', function () {
+          $.ajax({
+            url: '/refresh_token',
+            data: {
+              'refresh_token': refresh_token
+            }
+          }).done(function (data) {
+            access_token = data.access_token;
+            oauthPlaceholder.innerHTML = oauthTemplate({
+              access_token: access_token,
+              refresh_token: refresh_token
+            });
+          });
+        }, false);
+        /** 
+          * * id for this div is "get-all-songs"
+        **/
+        var tracks = [];
+        var total_tracks = 0;
+        var playlist_id = null;
+        document.getElementById('get-all-songs').addEventListener('click', function () {
+          $.ajax({
+            url: 'https://api.spotify.com/v1/me/playlists',
+            data: {
+              'access_token': access_token
+            }
+          }).done(function (data) {
+            /** 
+             * ! console.log(data); 
+            **/
+            // Get ID of playlist named __edhe
+
+            for ( var i = 0; i < data.items.length; i++ ) {
+              if ( data.items[i].name == "__edhe" ) {
+                playlist_id = data.items[i].id;
+                break;
+              }
+            }
+            // Get the total number of tracks in the playlist named __edhe
+            for ( var i = 0; i < data.items.length; i++ ) {
+              if ( data.items[i].name == "__edhe" ) {
+                total_tracks = data.items[i].tracks.total;
+                break;
+              }
+            }
+            console.log('playlist_id: ' + playlist_id);
+            console.log('total_tracks: ' + total_tracks);
+
+            // Get all tracks in the playlist named __edhe
+            var offset = 0;
+            var limit = 100;
+
+            while ( offset < total_tracks ) {
+              $.ajax({
+                url: 'https://api.spotify.com/v1/users/spotify/playlists/' + playlist_id + '/tracks',
+                data: {
+                  'access_token': access_token,
+                  'offset': offset,
+                  'limit': limit
+                }
+              }).done(function (data) {
+                for ( var i = 0; i < data.items.length; i++ ) {
+                  tracks.push({
+                    'name': data.items[i].track.name,
+                    'artist': data.items[i].track.artists[0],
+                    'uri': data.items[i].track.uri
+                  });
+                }
+              });
+              offset += limit;
+            }
+          });
+        });
+        var uris = [];
+        var uris_appear_more_than_once = [];
+        document.getElementById('download-csv').addEventListener('click', async function () {
+
+          for ( var i = 0; i < tracks.length; i++ ) {
+            if ( i == 0 ) {
+              uris.push(tracks[i].uri);
+            } else {
+              uris.push('\n' + tracks[i].uri);
+            }
+            console.log(i + ': ' + tracks[i].uri);
+            await sleep(1);
+          }
+          if ( uris.length == total_tracks ) {
+            var blob = new Blob([uris], { type: 'text/csv' });
+            var url = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = '__edhe.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        });
+
+        document.getElementById('duplicated-songs').addEventListener('click', async function () {
+          // Extract songs repeted in the playlist indicanding the number of times they appear
+          var uris_appear_count = [];
+          for ( var i = 0; i < uris.length; i++ ) {
+            // Copy the array uris into uris_appear_count but using the index of the array as the key
+            console.clear();
+            console.log('(Copy in a new array) Working, please wait...');
+            uris_appear_count.push({
+              'uri': uris[i],
+              'count': 0
+            });
+            console.log(i + '/' + uris.length);
+            await sleep(1);
+          }
+          console.log('Copy finished!');
+          await sleep(3000);
+          console.clear();
+
+          /**
+           * ! When the array uris_appear_count is filled, show the list of songs with the number of times they appear
+           * ! This function isn't necessary, but it's useful to see the list of songs with the number of times they appear
+          **/
+
+          // console.log('finished');
+          // await sleep(1);
+          // console.clear();
+          // for(var i = 0; i < uris_appear_count.length; i++) {
+          //   console.log('['+i+'] '+uris_appear_count[i].uri+': '+uris_appear_count[i].count);
+          //   await sleep(1);
+          // }
+
+          // Count the number of times each song appears in the playlist
+
+          console.log('(Counting) Working, please wait...');
+          for ( var i = 0; i < uris.length; i++ ) {
+            for ( var j = 0; j < uris_appear_count.length; j++ ) {
+              if ( uris[i] == uris_appear_count[j].uri ) {
+                uris_appear_count[j].count++;
+              }
+            }
+            console.log('[' + i + '] ' + uris[i] + ': ' + uris_appear_count[i].count);
+            await sleep(1);
+          }
+
+
+          // Show the list of songs with the number of times they appear
+          console.log('Count finished!');
+          await sleep(3000);
+          console.clear();
+
+          await sleep(1);
+          console.clear();
+          for ( var i = 0; i < uris_appear_count.length; i++ ) {
+            console.log(i + ': ' + uris_appear_count[i].uri + ': ' + uris_appear_count[i].count);
+            await sleep(1);
+          }
+
+          console.log('(Sorting) Working, please wait...');
+          // Save in a array uris that appears more than once
+
+          for ( var i = 0; i < uris_appear_count.length; i++ ) {
+            if ( uris_appear_count[i].count > 1 ) {
+              uris_appear_more_than_once.push(uris_appear_count[i].uri);
+            }
+          }
+          console.log('Sorting finished!');
+          await sleep(3000);
+          console.clear();
+
+          // Show the list of songs that appear more than once
+
+          console.log('(Show the list of songs that appear more than once) Working, please wait...');
+          await sleep(1);
+          console.clear();
+          for ( var i = 0; i < uris_appear_more_than_once.length; i++ ) {
+            console.log('[' + i + '] ' + uris_appear_more_than_once[i]);
+            await sleep(1);
+          }
+
+          /** 
+           *  TODO: There are 207 songs "duplicateds" in the playlist named __edhe
+          **/
+
+          // Depure uris_appear_more_than_once
+          for ( var i = 0; i < uris_appear_more_than_once.length; i++ ) {
+            for ( var j = 0; j < uris_appear_more_than_once.length; j++ ) {
+              if ( i != j) {
+                if ( uris_appear_more_than_once[i] == uris_appear_more_than_once[j] ) {
+                  uris_appear_more_than_once.splice(j, 1);
+                }
+              }
+            }
+          }
+
+          // Print with for
+          console.log('(Print with for) Working, please wait...');
+          await sleep(1);
+          console.clear();
+          for ( var i = 0; i < uris_appear_more_than_once.length; i++ ) {
+            console.log('[' + i + '] ' + uris_appear_more_than_once[i]);
+            await sleep(1);
+          }
+
+          // Export uris_appear_more_than_once to a csv file
+          var uris_appear_more_than_once_csv = [];
+          for ( var i = 0; i < uris_appear_more_than_once.length; i++ ) {
+            uris_appear_more_than_once_csv.push(uris_appear_more_than_once[i]);
+          }
+          var blob = new Blob([uris_appear_more_than_once_csv], { type: 'text/csv' });
+          var url = window.URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = '__edhe_repeted.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          console.log('Export finished!');
+        });
+
+        document.getElementById('delete-duplicated-songs').addEventListener('click', async function () {
+          console.clear();
+          console.log('The next songs will be deleted...');
+          for ( var i = 0; i < uris_appear_more_than_once.length; i++ ) {
+            console.log('[' + i + '] ' + uris_appear_more_than_once[i]);
+            await sleep(1);
+          }
+
+          console.clear();
+          // Deleted the songs with uris_appear_more_than_once from the playlist named __edhe
+
+
+          for ( let i = 0; i < uris_appear_more_than_once.length; i++ ) {
+            await sleep(1000);
+            $.ajax({
+              url: 'https://api.spotify.com/v1/users/spotiy/playlists/' + playlist_id + '/tracks',
+              type: 'DELETE',
+              data: JSON.stringify({
+                'tracks': [{
+                  'uri': uris_appear_more_than_once[i].substr(1, uris_appear_more_than_once[i].length)
+                }]
+              }),
+              headers: {
+                'Authorization': 'Bearer ' + access_token,
+                'Content-Type': 'application/json'
+              },
+            }).done(async function (response) {
+              await sleep(1000);
+              console.log(response);
+            });
+          } // End of for
+        });
+        // Get artist from array tracks
+        artists = [];
+        document.getElementById('get-artists').addEventListener('click', async function() {
+          console.clear();
+          console.log('Getting artist...');
+          for ( let i = 0; i < tracks.length; i++ ) {
+            await sleep(1);
+            // Save the artist name in the array artists without duplicates
+            if ( artists.indexOf( tracks[i].artist.name) !== -1 ){
+              // The artist is already in the array
+            } else {
+              // The artist is not in the array
+              artists.push(tracks[i].artist.name);
+            }
+          }
+          // Show the artists in the console
+          console.clear();
+          console.log('Artists:');
+          for ( let i = 0; i < artists.length; i++ ) {
+            await sleep(1);
+            console.log('[' + i + '] ' + artists[i]);
+          }
+        });
+      }
+
+      
+      function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms))
+      }
+    })();
+  </script>
+</body>
+
+</html>
